@@ -2971,53 +2971,15 @@ out_err:
 	list_add_tail(&t->work.entry, target_list);
 	tcomplete->type = BINDER_WORK_TRANSACTION_COMPLETE;
 	list_add_tail(&tcomplete->entry, &thread->todo);
-#ifdef RT_PRIO_INHERIT
 	if (target_wait) {
-		unsigned long flag;
-		wait_queue_t *curr, *next;
-		bool is_lock = false;
-
-		spin_lock_irqsave(&target_wait->lock, flag);
-		is_lock = true;
-		list_for_each_entry_safe(curr, next, &target_wait->task_list, task_list) {
-			unsigned flags = curr->flags;
-			struct task_struct *tsk = curr->private;
-			if (tsk == NULL) {
-				spin_unlock_irqrestore(&target_wait->lock, flag);
-				is_lock = false;
-				wake_up_interruptible(target_wait);
-				break;
-			}
-			if (!reply && (t->policy == SCHED_RR || t->policy == SCHED_FIFO)&&
-			    t->rt_prio > tsk->rt_priority &&
-			    !(t->flags & TF_ONE_WAY)) {
-				struct sched_param param = {
-					.sched_priority = t->rt_prio,
-				};
-
-				t->saved_rt_prio = tsk->rt_priority;
-				t->saved_policy = tsk->policy;
-				mt_sched_setscheduler_nocheck(tsk, t->policy, &param);
-#ifdef BINDER_MONITOR
-				if (log_disable & BINDER_RT_LOG_ENABLE)
-				{
-					pr_debug("write set %d sched_policy from %d to %d rt_prio from %d to %d\n",
-						tsk->pid, t->saved_policy, t->policy,
-						t->saved_rt_prio, t->rt_prio);
-				}
-#endif
-			}
-			if (curr->func(curr, TASK_INTERRUPTIBLE, 0, NULL) &&
-			    (flags & WQ_FLAG_EXCLUSIVE))
-				break;
+		if (reply || !(t->flags & TF_ONE_WAY)) {
+			preempt_disable();
+			wake_up_interruptible_sync(target_wait);
+			sched_preempt_enable_no_resched();
+		} else {
+			wake_up_interruptible(target_wait);
 		}
-		if (is_lock)
-			spin_unlock_irqrestore(&target_wait->lock, flag);
 	}
-#else
-	if (target_wait)
-		wake_up_interruptible(target_wait);
-#endif
 
 #ifdef BINDER_MONITOR
 	t->wait_on = reply ? WAIT_ON_REPLY_READ : WAIT_ON_READ;
