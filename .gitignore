@@ -84,6 +84,9 @@ GTAGS
 *~
 \#*#
 
+# kernel
+*.gz-dtb
+*.zip
 #
 # Leavings from module signing
 #
