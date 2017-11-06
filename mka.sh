@@ -41,10 +41,10 @@ make -C $PWD O=$PWD/out x500_defconfig
 echo "#########################"
 echo "###  BUILDING KERNEL  ###"
 echo "#########################"
-time make -j12 -C $PWD O=$PWD/out KCFLAGS=-mno-android
+time make -j16 -C $PWD O=$PWD/out KCFLAGS=-mno-android
 
 # Check if build was successfull
-if [ -e "$PWD/release/AnyKernel2/Image.gz-dtb" ]; then
+if [ -e "$PWD/out/arch/arm64/boot/Image.gz-dtb" ]; then
 echo "build complete !!!"
 
 # Anykernel2
@@ -59,7 +59,6 @@ ANYKERNEL_DIR="$KERNEL_DIR/release/AnyKernel2"
 REPACK_DIR="$ANYKERNEL_DIR"
 KERN_IMG=$KERNEL_DIR/out/arch/arm64/boot/Image.gz-dtb
 cp -vr $KERN_IMG $REPACK_DIR/Image.gz-dtb
-rm -rf out
 
 ############
 ## DEPLOY ##
@@ -84,10 +83,9 @@ rm -rf out
     echo 'Zipped succesfully'
 
 ## END
-
+fi
+rm -rf out
 rm -rf $REPACK_DIR/Image.gz-dtb
 else
-rm -rf out
-fi
-else
 echo "....build failed!!!"
+fi
