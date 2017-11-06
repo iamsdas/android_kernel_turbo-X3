@@ -21,10 +21,10 @@
 export KBUILD_BUILD_USER="sdas"
 export KBUILD_BUILD_HOST="ubuntu"
 export ARCH=arm64
-export LD_LIBRARY_PATH="/home/sdas/aarch64-linux-android-4.9/lib"
-export CROSS_COMPILE="/home/sdas/aarch64-linux-android-4.9/bin/aarch64-linux-android-"
+export LD_LIBRARY_PATH="/home/sdas/aarch64-linux-android-6.x/lib"
+export CROSS_COMPILE="/home/sdas/aarch64-linux-android-6.x/bin/aarch64-linux-android-"
 export SUBARCH=arm64
-export STRIP="/home/sdas/aarch64-linux-android-4.9/bin/aarch64-linux-android-"
+export STRIP="/home/sdas/aarch64-linux-android-6.x/bin/aarch64-linux-android-"
 mkdir $PWD/out
 
 # Make commands
