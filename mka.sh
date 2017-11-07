@@ -84,8 +84,9 @@ cp -vr $KERN_IMG $REPACK_DIR/Image.gz-dtb
 
 ## END
 fi
-rm -rf out
+rm -rf $PWD/out
 rm -rf $REPACK_DIR/Image.gz-dtb
 else
+rm -rf $PWD/out
 echo "....build failed!!!"
 fi
