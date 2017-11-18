@@ -59,7 +59,7 @@
 #define SENSOR_MAX_Y 1920
 #endif
 //[ gesture 
-#define WAKEUP_GESTURE false
+#define WAKEUP_GESTURE true
 //]
 #define NO_0D_WHILE_2D
 /*

@@ -52,7 +52,7 @@
 #define TYPE_B_PROTOCOL
 #endif
 
-#define WAKEUP_GESTURE_ENABLE false
+#define WAKEUP_GESTURE_ENABLE true
 
 #define NO_0D_WHILE_2D
 /*
@@ -148,11 +148,11 @@ static bool while_2d_status[MAX_NUMBER_OF_BUTTONS];
 #endif
 
 //wake up gesture enable flag
-static bool double_click = false;
-static bool up_to_down = false;
-static bool down_to_up = false;
-static bool left_to_right = false;
-static bool right_to_left = false;
+static bool double_click = true;
+static bool up_to_down = true;
+static bool down_to_up = true;
+static bool left_to_right = true;
+static bool right_to_left = true;
 /*
 struct incelll_wg{     //for incell module tp gesture wakeup
     void *prmi4_data;

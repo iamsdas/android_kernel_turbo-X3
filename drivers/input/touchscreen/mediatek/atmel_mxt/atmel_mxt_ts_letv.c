@@ -5938,8 +5938,8 @@ static int mxt_probe(struct i2c_client *client,
 	tpd_load_status = 1;
 
 //frank only for debug use
-//	data->enable_wakeup_gesture = 1;
-//	data->double_click_wake_enable = 1;
+	data->enable_wakeup_gesture = 1;
+	data->double_click_wake_enable = 1;
 //frank only for debug use
 //
 	return 0;
