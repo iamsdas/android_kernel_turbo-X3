@@ -262,6 +262,7 @@ struct synaptics_rmi4_data {
 #ifdef CONFIG_HAS_EARLYSUSPEND
 	struct early_suspend early_suspend;
 #endif
+	struct synaptics_rmi4_finger_state finger_state[MAX_NUMBER_OF_FINGERS];
 	unsigned char current_page;
 	unsigned char button_0d_enabled;
 	unsigned char full_pm_cycle;
@@ -326,6 +327,14 @@ struct synaptics_rmi4_access_ptr {
 	int (*write)(struct synaptics_rmi4_data *rmi4_data, unsigned short addr,
 			unsigned char *data, unsigned short length);
 	int (*enable)(struct synaptics_rmi4_data *rmi4_data, bool enable);
+};
+
+struct synaptics_rmi4_finger_state {
+	int x;
+	int y;
+	int wx;
+	int wy;
+	unsigned char status;
 };
 
 void synaptics_rmi4_new_function_l(struct synaptics_rmi4_exp_fn *exp_fn_module,

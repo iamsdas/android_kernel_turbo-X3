@@ -44,6 +44,24 @@
 #ifdef KERNEL_ABOVE_2_6_38
 #include <linux/input/mt.h>
 #endif
+
+#include <linux/hrtimer.h>
+#include <asm-generic/cputime.h>
+
+#define D2W_PWRKEY_DUR 60
+#define D2W_FEATHER    50
+#define D2W_TIME       700
+
+int d2w_switch = 1;
+
+static cputime64_t tap_time_pre = 0;
+static int x_pre = 0, y_pre = 0;
+static bool touch_cnt = true;
+bool scr_suspended = false;
+
+static struct input_dev * doubletap2wake_pwrdev;
+static DEFINE_MUTEX(pwrkeyworklock);
+
 #include <asm/uaccess.h>
 #define DRIVER_NAME "synaptics_dsx_i2c"
 #define INPUT_PHYS_NAME "synaptics_dsx_i2c/input0"
@@ -1105,6 +1123,7 @@ static int synaptics_rmi4_f11_abs_report(struct synaptics_rmi4_data *rmi4_data,
 	int temp;
 	struct synaptics_rmi4_f11_data_1_5 data;
 	struct synaptics_rmi4_f11_extra_data *extra_data;
+	struct synaptics_rmi4_finger_state currentf;
 
 	/*
 	 * The number of finger status registers is determined by the
@@ -1149,6 +1168,7 @@ static int synaptics_rmi4_f11_abs_report(struct synaptics_rmi4_data *rmi4_data,
 		finger_shift = (finger % 4) * 2;
 		finger_status = (finger_status_reg[reg_index] >> finger_shift)
 				& MASK_2BIT;
+	prev_status = rmi4_data->finger_state[finger].status;
 
 		/*
 		 * Each 2-bit finger status field represents the following:
@@ -1157,11 +1177,16 @@ static int synaptics_rmi4_f11_abs_report(struct synaptics_rmi4_data *rmi4_data,
 		 * 10 = finger present but data may be inaccurate
 		 * 11 = reserved
 		 */
+		if (!prev_status && !finger_status)
+			continue;
+
 #ifdef TYPE_B_PROTOCOL
 		input_mt_slot(rmi4_data->input_dev, finger);
 		input_mt_report_slot_state(rmi4_data->input_dev,
 				MT_TOOL_FINGER, finger_status);
 #endif
+
+	currentf.status = finger_status;
 
 		if (finger_status) {
 			data_offset = data_addr +
@@ -1180,6 +1205,11 @@ static int synaptics_rmi4_f11_abs_report(struct synaptics_rmi4_data *rmi4_data,
 			y = (data.y_position_11_4 << 4) | data.y_position_3_0;
 			wx = data.wx;
 			wy = data.wy;
+
+			currentf.x = x;
+			currentf.y = y;
+			currentf.wx = wx;
+			currentf.wy = wy;
 
 			input_report_key(rmi4_data->input_dev,
 					BTN_TOUCH, 1);
@@ -1219,6 +1249,8 @@ static int synaptics_rmi4_f11_abs_report(struct synaptics_rmi4_data *rmi4_data,
 
 			touch_count++;
 		}
+
+	synaptics_rmi4_proc_fngr(rmi4_data, &currentf, finger);
 	}
 
 	if (touch_count == 0) {
@@ -1270,6 +1302,7 @@ static int synaptics_rmi4_f12_abs_report(struct synaptics_rmi4_data *rmi4_data,
 	int wx;
 	int wy;
 	int temp;
+	struct synaptics_rmi4_finger_state currentf;
 	struct synaptics_rmi4_f12_extra_data *extra_data;
 	struct synaptics_rmi4_f12_finger_data *data;
 	struct synaptics_rmi4_f12_finger_data *finger_data;
@@ -1359,12 +1392,25 @@ if (rmi4_data->sensor_sleep && rmi4_data->enable_wakeup_gesture) {
 	for (finger = 0; finger < fingers_to_process; finger++) {
 		finger_data = data + finger;
 		finger_status = finger_data->object_type_and_status & MASK_1BIT;
+	prev_status = rmi4_data->finger_state[finger].status;
+
+		/*
+		 * Each 2-bit finger status field represents the following:
+		 * 00 = finger not present
+		 * 01 = finger present and data accurate
+		 * 10 = finger present but data may be inaccurate
+		 * 11 = reserved
+		 */
+		if (!prev_status && !finger_status)
+			continue;
 
 #ifdef TYPE_B_PROTOCOL
 		input_mt_slot(rmi4_data->input_dev, finger);
 		input_mt_report_slot_state(rmi4_data->input_dev,
 				MT_TOOL_FINGER, finger_status);
 #endif
+
+	currentf.status = finger_status;
 
 		if (finger_status) {
 #ifdef F12_DATA_15_WORKAROUND
@@ -1377,6 +1423,12 @@ if (rmi4_data->sensor_sleep && rmi4_data->enable_wakeup_gesture) {
 			wx = finger_data->wx;
 			wy = finger_data->wy;
 #endif
+
+
+			currentf.x = x;
+			currentf.y = y;
+			currentf.wx = wx;
+			currentf.wy = wy;
 
 			input_report_key(rmi4_data->input_dev,
 					BTN_TOUCH, 1);
@@ -1409,6 +1461,7 @@ if (rmi4_data->sensor_sleep && rmi4_data->enable_wakeup_gesture) {
 
 			touch_count++;
 		}
+	synaptics_rmi4_proc_fngr(rmi4_data, &currentf, finger);
 	}
 
 	if (touch_count == 0) {
@@ -1706,39 +1759,43 @@ static int synaptics_rmi4_irq_enable(struct synaptics_rmi4_data *rmi4_data,
 		bool enable)
 {
 	int retval = 0;
-	unsigned char intr_status[MAX_INTR_REGISTERS];
+	unsigned char intr_status;
+	unsigned int irq_flags;
+	const struct synaptics_dsx_platform_data *platform_data =
+			rmi4_data->i2c_client->dev.platform_data;
 
 	if (enable) {
+		if (rmi4_data->irq_enabled)
+			return retval;
 
 		/* Clear interrupts first */
 		retval = synaptics_rmi4_i2c_read(rmi4_data,
 				rmi4_data->f01_data_base_addr + 1,
-				intr_status,
+				&intr_status,
 				rmi4_data->num_of_intr_regs);
 		if (retval < 0)
 			return retval;
 
-		// set up irq
-		if (!rmi4_data->irq_enabled) {
-			mt_set_gpio_mode(GPIO_CTP_EINT_PIN, GPIO_CTP_EINT_PIN_M_EINT);
-			mt_set_gpio_dir(GPIO_CTP_EINT_PIN, GPIO_DIR_IN);
-			mt_set_gpio_pull_enable(GPIO_CTP_EINT_PIN, GPIO_PULL_DISABLE);
-			//mt_set_gpio_pull_select(GPIO_CTP_EINT_PIN, GPIO_PULL_UP);
+		irq_flags = platform_data->irq_type;
+		
+		//ngxson_dt2w
+		if(dt2w_switch == 1)
+			irq_flags = irq_flags | IRQF_NO_SUSPEND;
+		//end
+		
+		retval = request_threaded_irq(rmi4_data->irq, NULL,
+				synaptics_rmi4_irq, irq_flags,
+				DRIVER_NAME, rmi4_data);
+		if (retval < 0) {
+			printk( "ITUCH : Device(%s), Failed to create irq thread\n", dev_name( &rmi4_data->i2c_client->dev ) );
+			return retval;
+		}
 
-		//	mt65xx_eint_set_sens(CUST_EINT_TOUCH_PANEL_NUM, CUST_EINT_LEVEL_SENSITIVE);
-		//	mt65xx_eint_set_hw_debounce(CUST_EINT_TOUCH_PANEL_NUM, CUST_EINT_TOUCH_PANEL_DEBOUNCE_CN);
-		//	mt65xx_eint_registration(CUST_EINT_TOUCH_PANEL_NUM, CUST_EINT_TOUCH_PANEL_DEBOUNCE_EN, CUST_EINT_POLARITY_LOW, tpd_eint_handler, 0);
-			mt_eint_registration(CUST_EINT_TOUCH_PANEL_NUM, CUST_EINTF_TRIGGER_FALLING, tpd_eint_handler, 0);
-			}
-		mt_eint_unmask(CUST_EINT_TOUCH_PANEL_NUM);
 		rmi4_data->irq_enabled = true;
 	} else {
 		if (rmi4_data->irq_enabled) {
-			mt_eint_mask(CUST_EINT_TOUCH_PANEL_NUM);
-			mt_set_gpio_mode(GPIO_CTP_EINT_PIN, GPIO_CTP_EINT_PIN_M_GPIO);
-			mt_set_gpio_dir(GPIO_CTP_EINT_PIN, GPIO_DIR_IN);
-			mt_set_gpio_pull_enable(GPIO_CTP_EINT_PIN, GPIO_PULL_DISABLE);
-			//mt_set_gpio_pull_select(GPIO_CTP_EINT_PIN, GPIO_PULL_UP);
+			disable_irq(rmi4_data->irq);
+			free_irq(rmi4_data->irq, rmi4_data);
 			rmi4_data->irq_enabled = false;
 		}
 	}
@@ -4068,6 +4125,17 @@ static void synaptics_rmi4_early_suspend(struct early_suspend *h)
 		goto exit;
 	}
 	
+	if ((dt2w_switch > 0)) {
+		printk( "debug dt2w on\n");
+		if (rmi4_data->full_pm_cycle)
+			synaptics_rmi4_resume(&(rmi4_data->input_dev->dev));
+	
+		if (rmi4_data->sensor_sleep == true) {
+			synaptics_rmi4_sensor_wake(rmi4_data);
+			rmi4_data->touch_stopped = false;
+			synaptics_rmi4_irq_enable(rmi4_data, true);
+		}
+	} else {
 
 	rmi4_data->touch_stopped = true;
 	synaptics_rmi4_irq_enable(rmi4_data, false);
@@ -4087,6 +4155,7 @@ exit:
 	
 
 	rmi4_data->sensor_sleep = true;
+	}
 	return;
 }
 
@@ -4115,6 +4184,10 @@ static void synaptics_rmi4_late_resume(struct early_suspend *h)
 		goto exit;
 	}
 	
+	if (dt2w_switch > 0) {
+		printk( "ngxson: debug dt2w on\n");
+	} else {
+
 	if (rmi4_data->full_pm_cycle)
 		synaptics_rmi4_resume(&(rmi4_data->input_dev->dev));
 
@@ -4140,7 +4213,7 @@ exit:
 
 	rmi4_data->sensor_sleep = false;
 	rmi4_data->touch_stopped = false;
-
+	}
 	return;
 }
 #endif
@@ -4319,6 +4392,62 @@ static int tpd_local_init(void)
 	return 0;
 }
 
+static void doubletap2wake_presspwr(struct work_struct * doubletap2wake_presspwr_work) {
+	if (!mutex_trylock(&pwrkeyworklock))
+		return;
+	input_event(doubletap2wake_pwrdev, EV_KEY, KEY_POWER, 1);
+	input_event(doubletap2wake_pwrdev, EV_SYN, 0, 0);
+	msleep(D2W_PWRKEY_DUR);
+	input_event(doubletap2wake_pwrdev, EV_KEY, KEY_POWER, 0);
+	input_event(doubletap2wake_pwrdev, EV_SYN, 0, 0);
+	msleep(D2W_PWRKEY_DUR);
+	mutex_unlock(&pwrkeyworklock);
+	return;
+}
+static DECLARE_WORK(doubletap2wake_presspwr_work, doubletap2wake_presspwr);
+
+/* PowerKey trigger */
+static void doubletap2wake_pwrtrigger(void) {
+	schedule_work(&doubletap2wake_presspwr_work);
+	return;
+}
+
+void doubletap2wake_reset(void) {
+	tap_time_pre = 0;
+	x_pre = 0;
+	y_pre = 0;
+	touch_cnt = false;
+}
+
+static inline unsigned int calc_feather(int coord, int prev_coord) {
+	return abs(coord - prev_coord);
+}
+
+static inline void new_touch(int x, int y) {
+	tap_time_pre = ktime_to_ms(ktime_get());
+	x_pre = x;
+	y_pre = y;
+}
+
+static bool detect_doubletap2wake(int x, int y)
+{
+	printk("")
+	if (touch_cnt == false) {
+		new_touch(x, y);
+	} else {
+		if ((calc_feather(x, x_pre) < D2W_FEATHER) &&
+				(calc_feather(y, y_pre) < D2W_FEATHER) &&
+				(((ktime_to_ms(ktime_get()))-tap_time_pre) < D2W_TIME)) {
+			doubletap2wake_reset();
+			return true;
+		} else {
+			doubletap2wake_reset();
+			new_touch(x, y);
+		}
+	}
+	return false;
+} //detect_doubletap2wake
+
 static struct tpd_driver_t synaptics_rmi4_driver = {
 	.tpd_device_name = "synaptics_tpd",
 	.tpd_local_init = tpd_local_init,
@@ -4350,6 +4479,14 @@ static int __init synaptics_rmi4_init(void)
 			return -1;
 		}
 	}
+	doubletap2wake_pwrdev = input_allocate_device();
+	if (!doubletap2wake_pwrdev) {
+		pr_err("Can't allocate suspend autotest power button\n");
+		goto error_init;
+	}
+	doubletap2wake_pwrdev->name = "dt2w_pwrkey";
+	doubletap2wake_pwrdev->phys = "dt2w_pwrkey/input0";
+	input_set_capability(doubletap2wake_pwrdev, EV_KEY, KEY_POWER);
 	return 0;
 }
 
@@ -4367,6 +4504,115 @@ static void __exit synaptics_rmi4_exit(void)
 	tpd_driver_remove(&synaptics_rmi4_driver);
 	return;
 }
+
+static void synaptics_rmi4_proc_fngr(struct synaptics_rmi4_data *rmi4_data,
+		struct synaptics_rmi4_finger_state *currentf,
+		unsigned char finger)
+{
+	int x = currentf->x;
+	int y = currentf->y;
+	int wx = currentf->wx;
+	int wy = currentf->wy;
+
+#ifdef TYPE_B_PROTOCOL
+	int prev_x = rmi4_data->finger_state[finger].x;
+	int prev_y = rmi4_data->finger_state[finger].y;
+	int prev_wx = rmi4_data->finger_state[finger].wx;
+	int prev_wy = rmi4_data->finger_state[finger].wy;
+	unsigned char prev_status = rmi4_data->finger_state[finger].status;
+
+	if (!prev_status && currentf->status) {
+		input_report_abs(rmi4_data->input_dev,
+				ABS_MT_POSITION_X, x);
+		input_report_abs(rmi4_data->input_dev,
+				ABS_MT_POSITION_Y, y);
+		input_report_abs(rmi4_data->input_dev,
+				ABS_MT_TOUCH_MAJOR, max(wx, wy));
+		input_report_abs(rmi4_data->input_dev,
+				ABS_MT_TOUCH_MINOR, min(wx, wy));
+		rmi4_data->finger_state[finger].x = x;
+		rmi4_data->finger_state[finger].y = y;
+		rmi4_data->finger_state[finger].wx = wx;
+		rmi4_data->finger_state[finger].wy = wy;
+	} else if (prev_status && currentf->status) {
+		if (x != prev_x) {
+			input_report_abs(rmi4_data->input_dev,
+					ABS_MT_POSITION_X, x);
+			rmi4_data->finger_state[finger].x = x;
+		}
+		if (y != prev_y) {
+			input_report_abs(rmi4_data->input_dev,
+					ABS_MT_POSITION_Y, y);
+			rmi4_data->finger_state[finger].y = y;
+		}
+		if ((wx != prev_wx) || (wy != prev_wy)) {
+			input_report_abs(rmi4_data->input_dev,
+					ABS_MT_TOUCH_MAJOR, max(wx, wy));
+			input_report_abs(rmi4_data->input_dev,
+					ABS_MT_TOUCH_MINOR, min(wx, wy));
+			rmi4_data->finger_state[finger].wx = wx;
+			rmi4_data->finger_state[finger].wy = wy;
+		}
+	}
+#else
+	if (currentf->status) {
+		input_report_abs(rmi4_data->input_dev,
+				ABS_MT_POSITION_X, x);
+		input_report_abs(rmi4_data->input_dev,
+				ABS_MT_POSITION_Y, y);
+		input_report_abs(rmi4_data->input_dev,
+				ABS_MT_TOUCH_MAJOR, max(wx, wy));
+		input_report_abs(rmi4_data->input_dev,
+				ABS_MT_TOUCH_MINOR, min(wx, wy));
+		input_mt_sync(rmi4_data->input_dev);
+	}
+#endif
+
+	rmi4_data->finger_state[finger].status = currentf->status;
+
+	{
+		struct	touch_information
+		{
+			unsigned char	status;
+			int		x, y;
+			int		wx, wy;
+			unsigned	count;
+		};
+
+		static struct touch_information	finger_info[] =
+		{
+			{ 0, 0, 0, 0, 0, 0 }, { 0, 0, 0, 0, 0, 0 }, { 0, 0, 0, 0, 0, 0 }, { 0, 0, 0, 0, 0, 0 }, { 0, 0, 0, 0, 0, 0 }
+		};
+
+		if( finger < sizeof( finger_info ) / sizeof( *finger_info ) )
+		{
+			struct touch_information	*touch_info = finger_info + finger;
+			char	state_down = !touch_info->status && currentf->status, state_up = touch_info->status && !currentf->status;
+			char	show_log = state_down | state_up;
+
+			if( !state_up )
+				touch_info->x = x, touch_info->y = y, touch_info->wx = wx, touch_info->wy = wy, ++touch_info->count;
+
+			if( show_log )
+			{
+				touch_info->status	= !touch_info->status;
+				if((state_down) && (finger<1) && (scr_suspended) && (dt2w_switch == 1)) {
+					if (detect_doubletap2wake(touch_info->wx), touch_info->wy)) == true) {
+						pr_info("%s: d2w: power on\n", __func__);
+						doubletap2wake_pwrtrigger();
+					}
+				}
+				printk( "ITUCH : <%d>(%s)[%d(%d):%d(%d)]-%u\n", finger, state_down ? "down" : "up", touch_info->x, touch_info->wx, touch_info->y, touch_info->wy, touch_info->count );
+			}
+
+			if( state_up )
+				touch_info->count	= 0;
+		}
+	}
+
+	return;
+}
+
 
 module_init(synaptics_rmi4_init);
 module_exit(synaptics_rmi4_exit);
