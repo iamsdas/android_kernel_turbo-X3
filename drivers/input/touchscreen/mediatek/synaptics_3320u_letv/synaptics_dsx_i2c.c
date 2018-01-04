@@ -51,8 +51,7 @@
 #define D2W_PWRKEY_DUR 60
 #define D2W_FEATHER    50
 #define D2W_TIME       700
-
-int d2w_switch = 1;
+int dt2w_switch = 1;
 
 static cputime64_t tap_time_pre = 0;
 static int x_pre = 0, y_pre = 0;
@@ -4503,6 +4502,78 @@ static void __exit synaptics_rmi4_exit(void)
 
 	tpd_driver_remove(&synaptics_rmi4_driver);
 	return;
+}
+
+/**
+ * synaptics_rmi4_sensor_report() - reports to input subsystem
+ * @pdata: pointer to synaptics_rmi4_data structure
+ *
+ * This function is used to reads in all data sources and reports
+ * them to the input subsystem.
+ */
+static int synaptics_rmi4_sensor_report(struct synaptics_rmi4_data *pdata)
+{
+	unsigned char	intr_status[4];
+	/* number of touch points - fingers or buttons */
+	int touch = 0;
+	unsigned int retval;
+	struct synaptics_rmi4_fn		*rfi;
+	struct synaptics_rmi4_device_info	*rmi;
+	struct	i2c_client *client = pdata->i2c_client;
+
+	/*
+	 * Get the interrupt status from the function $01
+	 * control register+1 to find which source(s) were interrupting
+	 * so we can read the data from the source(s) (2D sensor, buttons..)
+	 */
+	retval = synaptics_rmi4_i2c_block_read(pdata,
+					pdata->fn01_data_base_addr + 1,
+					intr_status,
+					pdata->number_of_interrupt_register);
+	if (retval != pdata->number_of_interrupt_register) {
+		dev_err(&client->dev,
+				"could not read interrupt status registers\n");
+		return 0;
+	}
+	/*
+	 * check each function that has data sources and if the interrupt for
+	 * that triggered then call that RMI4 functions report() function to
+	 * gather data and report it to the input subsystem
+	 */
+	rmi = &(pdata->rmi4_mod_info);
+	list_for_each_entry(rfi, &rmi->support_fn_list, link) {
+		if (rfi->num_of_data_sources) {
+			if (intr_status[rfi->index_to_intr_reg] &
+							rfi->intr_mask)
+				touch = synaptics_rmi4_report_device(pdata,
+									rfi);
+		}
+	}
+	/* return the number of touch points */
+	return touch;
+}
+
+/**
+ * synaptics_rmi4_irq() - thread function for rmi4 attention line
+ * @irq: irq value
+ * @data: void pointer
+ *
+ * This function is interrupt thread function. It just notifies the
+ * application layer that attention is required.
+ */
+static irqreturn_t synaptics_rmi4_irq(int irq, void *data)
+{
+	struct synaptics_rmi4_data *pdata = data;
+	int touch_count;
+	do {
+		touch_count = synaptics_rmi4_sensor_report(pdata);
+		if (touch_count)
+			wait_event_timeout(pdata->wait, pdata->touch_stopped,
+							msecs_to_jiffies(1));
+		else
+			break;
+	} while (!pdata->touch_stopped);
+	return IRQ_HANDLED;
 }
 
 static void synaptics_rmi4_proc_fngr(struct synaptics_rmi4_data *rmi4_data,

@@ -92,6 +92,8 @@ extern unsigned char g_log_enable;
 #define MASK_2BIT 0x03
 #define MASK_1BIT 0x01
 
+#define MAX_NUMBER_OF_FINGERS 10
+
 enum exp_fn {
 	RMI_DEV = 0,
 	RMI_F54,
@@ -295,6 +297,7 @@ struct synaptics_rmi4_data {
 	bool enable_wakeup_gesture;
 	bool staying_awake;
 	bool ext_afe_button;
+	wait_queue_head_t wait;
 	unsigned char gesture_detection[F12_GESTURE_DETECTION_LEN];
 	int (*i2c_read)(struct synaptics_rmi4_data *pdata, unsigned short addr,
 			unsigned char *data, unsigned short length);
