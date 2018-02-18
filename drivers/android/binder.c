@@ -414,8 +414,6 @@ struct binder_transaction {
 };
 
 static void binder_defer_work(struct binder_proc *proc, enum binder_deferred_state defer);
-static inline void binder_lock(const char *tag);
-static inline void binder_unlock(const char *tag);
 static int task_get_unused_fd_flags(struct binder_proc *proc, int flags)
 {
 	struct files_struct *files = proc->files;
