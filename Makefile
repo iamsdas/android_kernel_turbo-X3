@@ -376,11 +376,13 @@ KBUILD_CFLAGS   := -Wall -Wundef -Wstrict-prototypes -Wno-trigraphs \
 		   -fno-delete-null-pointer-checks \
 		   -Werror=format \
 		   -mtune=cortex-a53 \
-		   -mcpu=cortex-a53 \
 		   -Wno-nonnull \
-		   -march=armv8-a \
+		   -march=armv8-a+simd \
+		   -funsafe-math-optimizations \
+		   -ffast-math \
 		   -std=gnu89
 
+KBUILD_AFLAGS += -mfpu=neon-vfpv4
 KBUILD_AFLAGS_KERNEL :=
 KBUILD_CFLAGS_KERNEL :=
 KBUILD_AFLAGS   := -D__ASSEMBLY__
