@@ -380,6 +380,11 @@ KBUILD_CFLAGS   := -Wall -Wundef -Wstrict-prototypes -Wno-trigraphs \
 		   -march=armv8-a+simd \
 		   -funsafe-math-optimizations \
 		   -ffast-math \
+		   -fno-signed-zeros \
+		   -fno-trapping-math \
+		   -frename-registers \
+		   -funroll-loops \
+		   -fopenmp \
 		   -std=gnu89
 
 KBUILD_AFLAGS += -mfpu=neon-vfpv4
