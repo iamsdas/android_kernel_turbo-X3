@@ -615,6 +615,11 @@ KBUILD_CFLAGS += $(call cc-disable-warning, unused-const-variable)
 KBUILD_CFLAGS += $(call cc-disable-warning, unused-label)
 KBUILD_CFLAGS += $(call cc-disable-warning, unused-variable)
 KBUILD_CFLAGS += $(call cc-disable-warning, incompatible-pointer-types)
+
+#Fix gcc7.x
+KBUILD_CFLAGS += -Wno-error=format-overflow
+KBUILD_CFLAGS += -Wno-error=format-truncation
+
 ifdef CONFIG_FRAME_POINTER
 KBUILD_CFLAGS	+= -fno-omit-frame-pointer -fno-optimize-sibling-calls
 else

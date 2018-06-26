@@ -13,13 +13,13 @@
  #MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  #GNU General Public License for more details.
  #
-#
 
+#
 # This build script checks if the build completed successfully or not and also creats a flashable zip file of the kernel if conditions are met.
 
 # User variables
 export KBUILD_BUILD_USER="sdas"
-export KBUILD_BUILD_HOST="ubuntu"
+export KBUILD_BUILD_HOST="archlinux"
 export ARCH=arm64
 export LD_LIBRARY_PATH="/home/sdas/kernel/aarch64-linux-gnu/lib"
 export CROSS_COMPILE="/home/sdas/kernel/aarch64-linux-gnu/bin/aarch64-linux-gnu-"
