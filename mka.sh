@@ -19,12 +19,12 @@
 
 # User variables
 export KBUILD_BUILD_USER="sdas"
-export KBUILD_BUILD_HOST="ubuntu"
+export KBUILD_BUILD_HOST="archlinux"
 export ARCH=arm64
-export LD_LIBRARY_PATH="/home/sdas/kernel/aarch64-linux-android-6.x/lib"
-export CROSS_COMPILE="/home/sdas/kernel/aarch64-linux-android-6.x/bin/aarch64-linux-android-"
+export LD_LIBRARY_PATH="/home/sdas/kernel/aarch64-linux-gnu/lib"
+export CROSS_COMPILE="/home/sdas/kernel/aarch64-linux-gnu/bin/aarch64-linux-gnu-"
 export SUBARCH=arm64
-export STRIP="/home/sdas/kernel/aarch64-linux-android-6.x/bin/aarch64-linux-android-"
+export STRIP="/home/sdas/kernel/aarch64-linux-gnu/bin/aarch64-linux-gnu-"
 mkdir $PWD/out
 
 # Make commands
@@ -41,7 +41,7 @@ make -C $PWD O=$PWD/out x500_defconfig
 echo "#########################"
 echo "###  BUILDING KERNEL  ###"
 echo "#########################"
-time make -j16 -C $PWD O=$PWD/out KCFLAGS=-mno-android
+time make -j16 -C $PWD O=$PWD/out
 
 # Check if build was successfull
 if [ -e "$PWD/out/arch/arm64/boot/Image.gz-dtb" ]; then
